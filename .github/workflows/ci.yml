@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  engine-and-python:
+    name: C++ engine (CPU) + Python
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python package
+        run: pip install -e ".[dev]"
+      - name: Configure
+        run: cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DMC_ENABLE_CUDA=OFF -DPython_EXECUTABLE="$(which python)"
+      - name: Build
+        run: cmake --build build -j
+      - name: Engine tests
+        run: ctest --test-dir build --output-on-failure
+      - name: Bench smoke test
+        run: ./build/mc_bench --paths 65536 --steps 16 --cpu-reps 1
+      - name: Python tests
+        run: pytest -q
+      - name: Lint
+        run: ruff check backtester api
+
+  cuda-compile:
+    name: CUDA compile check
+    runs-on: ubuntu-latest
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install CMake
+        run: apt-get update && apt-get install -y --no-install-recommends python3-pip && pip3 install "cmake>=3.24"
+      - name: Configure
+        run: cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release -DMC_BUILD_PYTHON=OFF -DCMAKE_CUDA_ARCHITECTURES="75;86"
+      - name: Build (no GPU on hosted runners, so tests are compiled but not run)
+        run: cmake --build build -j
+
+  dashboard:
+    name: Dashboard
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: dashboard
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run build
