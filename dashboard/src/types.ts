@@ -2,6 +2,7 @@ export interface EngineInfo {
   native: boolean;
   cuda: boolean;
   device: string;
+  cpu_threads: number;
 }
 
 export interface Strategy {
@@ -105,6 +106,7 @@ export interface PriceResponse {
   n_paths: number;
   n_steps: number;
   backend: string;
+  threads: number;
   prob_positive_payoff: number;
   histogram: { lo: number; hi: number; count: number }[];
   payoff_curve: { spot: number; payoff: number }[];

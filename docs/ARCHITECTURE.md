@@ -23,7 +23,7 @@
                                 ┌─────────────────────────────────▼───────────────────────────────┐
                                 │ engine/ (C++17 / CUDA)  → mcengine.*.pyd / .so                  │
                                 │  gpu_engine.cu + kernels.cu ── CUDA backend                     │
-                                │  cpu_engine.cpp ───────────── single-thread reference           │
+                                │  cpu_engine.cpp ───────────── 1-thread + multi-thread backends  │
                                 │  payoffs.hpp / models.hpp ─── shared __host__ __device__ code   │
                                 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -50,6 +50,6 @@
 ## Build matrix
 | Environment | Engine backends | Python module |
 |---|---|---|
-| NVIDIA GPU + CUDA toolkit | CUDA + CPU | `mcengine` (backend `auto` → CUDA) |
-| No CUDA compiler (CI, laptops) | CPU (`gpu_stub.cpp`) | `mcengine` (backend `auto` → CPU) |
+| NVIDIA GPU + CUDA toolkit | CUDA + CPU (1 thread and multi-thread) | `mcengine` (backend `auto` → CUDA) |
+| No CUDA compiler (CI, laptops) | CPU only (`gpu_stub.cpp`) | `mcengine` (backend `auto` → `cpu_mt`) |
 | Module not built | — | NumPy fallback in `osb.engine` (European only) |

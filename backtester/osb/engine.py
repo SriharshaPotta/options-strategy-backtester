@@ -31,6 +31,10 @@ def device_name() -> str:
     return _native.device_name() if _native else ""
 
 
+def cpu_threads() -> int:
+    return int(_native.cpu_threads()) if _native else 1
+
+
 def _numpy_price(spot, rate, vol, maturity, legs, div, n_paths, n_steps, seed, return_terminal):
     rng = np.random.default_rng(seed)
     dt = maturity / n_steps
@@ -55,19 +59,20 @@ def _numpy_price(spot, rate, vol, maturity, legs, div, n_paths, n_steps, seed, r
 
 def price(spot: float, rate: float, vol: float, maturity: float, legs: Sequence[LegSpec], *, div: float = 0.0,
           style: str = "european", barrier: float = 0.0, n_paths: int = 1 << 20, n_steps: int = 252,
-          seed: int = 42, backend: str = "auto", return_terminal: bool = False) -> dict[str, Any]:
+          seed: int = 42, backend: str = "auto", return_terminal: bool = False, threads: int = 0) -> dict[str, Any]:
+    """backend: auto (cuda if available, else cpu_mt) | cuda | cpu (one thread) | cpu_mt (`threads`, 0 = all)."""
     legs = [(str(t), float(k), float(q)) for t, k, q in legs]
     if _native is not None:
         return dict(_native.price(spot, rate, vol, maturity, legs, div=div, style=style, barrier=barrier,
                                   n_paths=n_paths, n_steps=n_steps, seed=seed, backend=backend,
-                                  return_terminal=return_terminal))
-    if style != "european" or backend == "cuda":
-        raise RuntimeError("native mcengine module not built; only european/cpu pricing is available")
+                                  return_terminal=return_terminal, threads=threads))
+    if style != "european" or backend not in ("auto", "cpu"):
+        raise RuntimeError("native mcengine module not built; only european pricing on backend=cpu is available")
     t0 = time.perf_counter()
     out = _numpy_price(spot, rate, vol, maturity, legs, div, n_paths, n_steps, seed, return_terminal)
     out.update(ci_low=out["price"] - 1.96 * out["std_error"], ci_high=out["price"] + 1.96 * out["std_error"],
                elapsed_ms=(time.perf_counter() - t0) * 1e3, rng_init_ms=0.0, n_paths=n_paths, n_steps=n_steps,
-               backend="numpy")
+               backend="numpy", threads=1)
     return out
 
 

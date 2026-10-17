@@ -1,9 +1,11 @@
-// CPU (single-threaded) vs CUDA timing for the Monte Carlo engine.
+// CPU (single- and multi-threaded) vs CUDA timing for the Monte Carlo engine.
 //
-//   mc_bench [--paths 1048576,2097152,4194304] [--steps 252] [--reps 5] [--cpu-reps 3] [--json out.json]
+//   mc_bench [--paths 1048576,2097152,4194304] [--steps 252] [--reps 5] [--cpu-reps 3]
+//            [--threads N] [--json out.json]
 //
 // GPU time = simulation kernel + reduction + result copy (cudaEvent). RNG seeding
-// is reported separately. CPU time = std::chrono around the whole loop.
+// is reported separately. CPU times = std::chrono around the whole simulation, for
+// one thread and for N threads (default: every hardware thread).
 
 #include <algorithm>
 #include <cmath>
@@ -56,12 +58,17 @@ mc::ContractSpec iron_condor(double s0) {
     return s;
 }
 
+bool within(const mc::PriceResult& a, const mc::PriceResult& b) {
+    return std::abs(a.price - b.price) <= 3.0 * std::hypot(a.std_error, b.std_error);
+}
+
 }  // namespace
 
 int main(int argc, char** argv) {
     std::vector<uint64_t> sizes{1u << 20, 1u << 21, 1u << 22};
     uint32_t steps = 252;
     int reps = 5, cpu_reps = 3;
+    unsigned threads = mc::cpu::default_threads();
     std::string json_path;
 
     for (int i = 1; i < argc; ++i) {
@@ -74,6 +81,7 @@ int main(int argc, char** argv) {
         else if (a == "--steps") steps = static_cast<uint32_t>(std::stoul(next()));
         else if (a == "--reps") reps = std::stoi(next());
         else if (a == "--cpu-reps") cpu_reps = std::stoi(next());
+        else if (a == "--threads") threads = static_cast<unsigned>(std::stoul(next()));
         else if (a == "--json") json_path = next();
         else { std::fprintf(stderr, "unknown argument %s\n", a.c_str()); return 2; }
     }
@@ -83,12 +91,14 @@ int main(int argc, char** argv) {
 
     const bool has_gpu = mc::gpu::available();
     const std::string device = has_gpu ? mc::gpu::device_name() : "none";
-    std::printf("device: %s | steps: %u | gpu reps: %d | cpu reps: %d\n", device.c_str(), steps, reps, cpu_reps);
-    std::printf("%-14s %10s %12s %12s %10s %10s %9s %s\n", "case", "paths", "cpu_ms", "gpu_ms", "rng_ms", "speedup",
-                "bs_ref", "agree");
+    std::printf("device: %s | cpu threads: %u | steps: %u | gpu reps: %d | cpu reps: %d\n", device.c_str(), threads,
+                steps, reps, cpu_reps);
+    std::printf("%-14s %10s %11s %11s %9s %9s %10s %10s %9s %s\n", "case", "paths", "cpu_1t_ms", "cpu_mt_ms",
+                "mt_scale", "gpu_ms", "gpu_vs_1t", "gpu_vs_mt", "bs_ref", "agree");
 
     std::ostringstream js;
-    js << "{\n  \"device\": \"" << device << "\",\n  \"steps\": " << steps << ",\n  \"results\": [";
+    js << "{\n  \"device\": \"" << device << "\",\n  \"cpu_threads\": " << threads << ",\n  \"steps\": " << steps
+       << ",\n  \"results\": [";
     bool first = true;
 
     for (const auto& c : cases) {
@@ -103,9 +113,16 @@ int main(int argc, char** argv) {
                 cpu_ms.push_back(cpu_r.elapsed_ms);
             }
 
+            std::vector<double> mt_ms;
+            mc::PriceResult mt_r;
+            for (int r = 0; r < std::max(cpu_reps, 3); ++r) {
+                mt_r = mc::cpu::price_mt(m, c.spec, cfg, threads);
+                mt_ms.push_back(mt_r.elapsed_ms);
+            }
+
             double gpu_med = NAN, rng_med = NAN;
-            bool agree = true;
             mc::PriceResult gpu_r;
+            bool agree = within(cpu_r, mt_r);
             if (has_gpu) {
                 auto& eng = mc::gpu::default_engine();
                 eng.price(m, c.spec, cfg);  // warm-up: context, module load, constant upload
@@ -117,26 +134,29 @@ int main(int argc, char** argv) {
                 }
                 gpu_med = median(gpu_ms);
                 rng_med = median(rng_ms);
-                const double tol = 3.0 * std::hypot(cpu_r.std_error, gpu_r.std_error);
-                agree = std::abs(cpu_r.price - gpu_r.price) <= tol;
+                agree = agree && within(cpu_r, gpu_r);
             }
 
             const double cpu_med = median(cpu_ms);
+            const double mt_med = median(mt_ms);
             const double speedup = cpu_med / gpu_med;
-            std::printf("%-14s %10llu %12.1f %12.2f %10.2f %9.1fx %9.4f %s\n", c.name.c_str(),
-                        static_cast<unsigned long long>(n), cpu_med, gpu_med, rng_med, speedup, ref,
-                        has_gpu ? (agree ? "yes" : "NO") : "-");
+            const double speedup_mt = mt_med / gpu_med;
+            std::printf("%-14s %10llu %11.1f %11.1f %8.1fx %9.2f %9.1fx %9.1fx %9.4f %s\n", c.name.c_str(),
+                        static_cast<unsigned long long>(n), cpu_med, mt_med, cpu_med / mt_med, gpu_med, speedup,
+                        speedup_mt, ref, agree ? "yes" : "NO");
 
             js << (first ? "\n" : ",\n") << "    {\"case\": \"" << c.name << "\", \"paths\": " << n
                << ", \"cpu_ms\": " << cpu_med << ", \"cpu_price\": " << cpu_r.price
-               << ", \"cpu_se\": " << cpu_r.std_error << ", \"bs_reference\": " << ref;
+               << ", \"cpu_se\": " << cpu_r.std_error << ", \"cpu_mt_ms\": " << mt_med
+               << ", \"cpu_mt_price\": " << mt_r.price << ", \"mt_scaling\": " << cpu_med / mt_med
+               << ", \"bs_reference\": " << ref;
             if (has_gpu)
                 js << ", \"gpu_ms\": " << gpu_med << ", \"gpu_rng_init_ms\": " << rng_med
                    << ", \"gpu_price\": " << gpu_r.price << ", \"gpu_se\": " << gpu_r.std_error
-                   << ", \"speedup\": " << speedup << ", \"prices_agree\": " << (agree ? "true" : "false");
-            js << "}";
+                   << ", \"speedup\": " << speedup << ", \"speedup_vs_mt\": " << speedup_mt;
+            js << ", \"prices_agree\": " << (agree ? "true" : "false") << "}";
             first = false;
-            if (!agree) std::fprintf(stderr, "warning: CPU/GPU prices disagree beyond 3 SE for %s\n", c.name.c_str());
+            if (!agree) std::fprintf(stderr, "warning: backend prices disagree beyond 3 SE for %s\n", c.name.c_str());
         }
     }
     js << "\n  ]\n}\n";

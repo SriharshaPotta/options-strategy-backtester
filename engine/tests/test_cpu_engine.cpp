@@ -136,3 +136,35 @@ TEST(Greeks, BumpDeltaCloseToAnalytic) {
     EXPECT_GT(g.gamma, 0.0);
     EXPECT_GT(g.vega, 0.0);
 }
+
+TEST(CpuEngineMt, SingleThreadMatchesReferenceExactly) {
+    const auto spec = single(mc::OptionType::Call, 100.0);
+    const mc::SimConfig cfg{20'000, 16, 5};
+    EXPECT_DOUBLE_EQ(mc::cpu::price_mt(kMarket, spec, cfg, 1).price, mc::cpu::price(kMarket, spec, cfg).price);
+}
+
+TEST(CpuEngineMt, MatchesBlackScholes) {
+    for (unsigned threads : {2u, 7u, 0u}) {
+        const auto r = mc::cpu::price_mt(kMarket, single(mc::OptionType::Put, 95.0), kCfg, threads);
+        expect_within_se(r, mc::black_scholes(mc::OptionType::Put, kMarket, 95.0));
+        EXPECT_EQ(r.n_paths, kCfg.n_paths);
+    }
+}
+
+TEST(CpuEngineMt, DeterministicForSeedAndThreadCount) {
+    const auto spec = single(mc::OptionType::Call, 100.0);
+    const mc::SimConfig cfg{50'000, 8, 13};
+    EXPECT_DOUBLE_EQ(mc::cpu::price_mt(kMarket, spec, cfg, 4).price, mc::cpu::price_mt(kMarket, spec, cfg, 4).price);
+}
+
+TEST(CpuEngineMt, TerminalOutputFilledByAllWorkers) {
+    std::vector<float> terminal;
+    mc::cpu::price_mt(kMarket, single(mc::OptionType::Call, 100.0), {30'001, 4, 3}, 6, &terminal);
+    ASSERT_EQ(terminal.size(), 30'001u);
+    for (float s : terminal) ASSERT_GT(s, 0.0f);
+}
+
+TEST(CpuEngineMt, MorePathsThanThreadsNotRequired) {
+    const auto r = mc::cpu::price_mt(kMarket, single(mc::OptionType::Call, 100.0), {3, 4, 1}, 16);
+    EXPECT_EQ(r.n_paths, 3u);
+}

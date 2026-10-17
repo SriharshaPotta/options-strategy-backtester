@@ -45,34 +45,55 @@ mc::ContractSpec make_spec(const std::vector<LegTuple>& legs, const std::string&
     return spec;
 }
 
-bool use_cuda(const std::string& backend) {
+enum class Backend { Cuda, Cpu, CpuMt };
+
+Backend resolve(const std::string& backend) {
     if (backend == "cuda") {
         if (!mc::gpu::available()) throw std::runtime_error("backend='cuda' requested but no CUDA device is available");
-        return true;
+        return Backend::Cuda;
     }
-    if (backend == "cpu") return false;
-    if (backend == "auto") return mc::gpu::available();
-    throw std::invalid_argument("unknown backend '" + backend + "' (expected auto|cuda|cpu)");
+    if (backend == "cpu") return Backend::Cpu;
+    if (backend == "cpu_mt") return Backend::CpuMt;
+    if (backend == "auto") return mc::gpu::available() ? Backend::Cuda : Backend::CpuMt;
+    throw std::invalid_argument("unknown backend '" + backend + "' (expected auto|cuda|cpu|cpu_mt)");
 }
 
-mc::PriceResult run(bool cuda, const mc::MarketParams& m, const mc::ContractSpec& spec, const mc::SimConfig& cfg,
-                    std::vector<float>* terminal = nullptr) {
-    return cuda ? mc::gpu::default_engine().price(m, spec, cfg, terminal) : mc::cpu::price(m, spec, cfg, terminal);
+const char* name(Backend b) {
+    switch (b) {
+        case Backend::Cuda: return "cuda";
+        case Backend::Cpu: return "cpu";
+        default: return "cpu_mt";
+    }
+}
+
+unsigned thread_count(Backend b, unsigned threads) {
+    if (b == Backend::Cpu) return 1;
+    if (b == Backend::CpuMt) return threads ? threads : mc::cpu::default_threads();
+    return 0;
+}
+
+mc::PriceResult run(Backend b, unsigned threads, const mc::MarketParams& m, const mc::ContractSpec& spec,
+                    const mc::SimConfig& cfg, std::vector<float>* terminal = nullptr) {
+    switch (b) {
+        case Backend::Cuda: return mc::gpu::default_engine().price(m, spec, cfg, terminal);
+        case Backend::Cpu: return mc::cpu::price(m, spec, cfg, terminal);
+        default: return mc::cpu::price_mt(m, spec, cfg, threads, terminal);
+    }
 }
 
 py::dict price(double spot, double rate, double vol, double maturity, const std::vector<LegTuple>& legs, double div,
                const std::string& style, double barrier, uint64_t n_paths, uint32_t n_steps, uint64_t seed,
-               const std::string& backend, bool return_terminal) {
+               const std::string& backend, bool return_terminal, unsigned threads) {
     const mc::MarketParams m{spot, rate, div, vol, maturity};
     const mc::ContractSpec spec = make_spec(legs, style, barrier);
     const mc::SimConfig cfg{n_paths, n_steps, seed};
-    const bool cuda = use_cuda(backend);
+    const Backend b = resolve(backend);
 
     std::vector<float> terminal;
     mc::PriceResult r;
     {
         py::gil_scoped_release release;
-        r = run(cuda, m, spec, cfg, return_terminal ? &terminal : nullptr);
+        r = run(b, threads, m, spec, cfg, return_terminal ? &terminal : nullptr);
     }
 
     py::dict out;
@@ -84,24 +105,25 @@ py::dict price(double spot, double rate, double vol, double maturity, const std:
     out["rng_init_ms"] = r.rng_init_ms;
     out["n_paths"] = r.n_paths;
     out["n_steps"] = r.n_steps;
-    out["backend"] = cuda ? "cuda" : "cpu";
+    out["backend"] = name(b);
+    out["threads"] = thread_count(b, threads);
     if (return_terminal) out["terminal"] = py::array_t<float>(terminal.size(), terminal.data());
     return out;
 }
 
 py::dict greeks(double spot, double rate, double vol, double maturity, const std::vector<LegTuple>& legs, double div,
                 const std::string& style, double barrier, uint64_t n_paths, uint32_t n_steps, uint64_t seed,
-                const std::string& backend) {
+                const std::string& backend, unsigned threads) {
     const mc::MarketParams m{spot, rate, div, vol, maturity};
     const mc::ContractSpec spec = make_spec(legs, style, barrier);
     const mc::SimConfig cfg{n_paths, n_steps, seed};
-    const bool cuda = use_cuda(backend);
+    const Backend b = resolve(backend);
 
     mc::Greeks g;
     {
         py::gil_scoped_release release;
         g = mc::bump_greeks([&](const mc::MarketParams& mm, const mc::ContractSpec& s, const mc::SimConfig& c) {
-            return run(cuda, mm, s, c);
+            return run(b, threads, mm, s, c);
         }, m, spec, cfg);
     }
 
@@ -110,7 +132,7 @@ py::dict greeks(double spot, double rate, double vol, double maturity, const std
     out["delta"] = g.delta;
     out["gamma"] = g.gamma;
     out["vega"] = g.vega;
-    out["backend"] = cuda ? "cuda" : "cpu";
+    out["backend"] = name(b);
     return out;
 }
 
@@ -122,16 +144,18 @@ PYBIND11_MODULE(mcengine, mod) {
 
     mod.def("has_cuda", &mc::gpu::available, "True if a CUDA device is usable");
     mod.def("device_name", &mc::gpu::device_name, "Name of the active CUDA device, or '' if none");
+    mod.def("cpu_threads", &mc::cpu::default_threads, "Hardware threads used by backend='cpu_mt' by default");
 
     mod.def("price", &price, py::arg("spot"), py::arg("rate"), py::arg("vol"), py::arg("maturity"), py::arg("legs"),
             py::arg("div") = 0.0, py::arg("style") = "european", py::arg("barrier") = 0.0,
             py::arg("n_paths") = 1u << 20, py::arg("n_steps") = 252, py::arg("seed") = 42,
-            py::arg("backend") = "auto", py::arg("return_terminal") = false,
-            "Price a multi-leg contract. legs = [(type, strike, qty), ...] with type in call|put|stock.");
+            py::arg("backend") = "auto", py::arg("return_terminal") = false, py::arg("threads") = 0u,
+            "Price a multi-leg contract. legs = [(type, strike, qty), ...] with type in call|put|stock.\n"
+            "backend: auto (cuda if available, else cpu_mt) | cuda | cpu (1 thread) | cpu_mt (threads, 0 = all).");
 
     mod.def("greeks", &greeks, py::arg("spot"), py::arg("rate"), py::arg("vol"), py::arg("maturity"),
             py::arg("legs"), py::arg("div") = 0.0, py::arg("style") = "european", py::arg("barrier") = 0.0,
             py::arg("n_paths") = 1u << 20, py::arg("n_steps") = 252, py::arg("seed") = 42,
-            py::arg("backend") = "auto",
+            py::arg("backend") = "auto", py::arg("threads") = 0u,
             "Bump-and-revalue delta/gamma/vega with common random numbers.");
 }

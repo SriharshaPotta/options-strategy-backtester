@@ -37,7 +37,8 @@
 - [x] Run `notebooks/gpu_benchmark.ipynb` on an NVIDIA GPU (Tesla T4) and record results in BENCHMARKS.md
 
 ## Later
-- [ ] Multi-threaded + SIMD CPU baseline (OpenMP) for a stronger comparison
+- [x] Multi-threaded CPU baseline (`cpu_mt`, std::thread, one RNG stream per worker)
+- [ ] SIMD-vectorised CPU RNG for an even stronger baseline
 - [ ] Heston stochastic-volatility paths
 - [ ] Antithetic variates / control variates
 - [ ] Multi-GPU split across devices
