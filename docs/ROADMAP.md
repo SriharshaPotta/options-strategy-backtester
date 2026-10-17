@@ -34,9 +34,10 @@
 - [x] MC pricer: leg editor, payoff distribution histogram
 
 ## M6 — GPU benchmark
-- [ ] Run `notebooks/gpu_benchmark.ipynb` on an NVIDIA GPU and record results in BENCHMARKS.md
+- [x] Run `notebooks/gpu_benchmark.ipynb` on an NVIDIA GPU (Tesla T4) and record results in BENCHMARKS.md
 
 ## Later
+- [ ] Multi-threaded + SIMD CPU baseline (OpenMP) for a stronger comparison
 - [ ] Heston stochastic-volatility paths
 - [ ] Antithetic variates / control variates
 - [ ] Multi-GPU split across devices

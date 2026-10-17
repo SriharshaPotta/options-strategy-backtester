@@ -17,7 +17,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CUDA_ENGINE.md](docs/
 
 ## Performance
 
-The GPU-vs-CPU comparison (1M–4M paths × 252 steps) is produced by [`notebooks/gpu_benchmark.ipynb`](notebooks/gpu_benchmark.ipynb). Results are in [docs/BENCHMARKS.md](docs/BENCHMARKS.md).
+NVIDIA Tesla T4, 252 steps per path, versus the same scheme on one CPU thread ([details](docs/BENCHMARKS.md)):
+
+| paths | CPU (1 thread) | CUDA (T4) | speedup |
+|--:|--:|--:|--:|
+| 1,048,576 | 6.2 s | 6.0 ms | ~1,035× |
+| 4,194,304 | 25.0 s | 24.0 ms | ~1,043× |
+
+The GPU and CPU prices agree within one combined standard error and match Black-Scholes. Reproduce with [`notebooks/gpu_benchmark.ipynb`](notebooks/gpu_benchmark.ipynb).
 
 ## Quick start
 
