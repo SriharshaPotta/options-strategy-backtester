@@ -3,13 +3,13 @@ import pandas as pd
 from fastapi.testclient import TestClient
 
 from api import main
-from osb import data
+from osb import data, engine
 
 client = TestClient(main.app)
 
 
 def test_engine_and_strategies():
-    assert set(client.get("/api/engine").json()) == {"native", "cuda", "device"}
+    assert set(client.get("/api/engine").json()) == {"native", "cuda", "device", "cpu_threads"}
     keys = {s["key"] for s in client.get("/api/strategies").json()}
     assert "iron_condor" in keys
 
@@ -47,3 +47,12 @@ def test_backtest_uses_history(monkeypatch):
     body = r.json()
     assert body["metrics"]["n_trades"] > 0
     assert len(body["equity"]) > 100
+
+
+def test_price_multithreaded_backend():
+    r = client.post("/api/price", json={"n_paths": 40000, "n_steps": 4, "backend": "cpu_mt", "threads": 4})
+    if not engine.native_available():
+        assert r.status_code == 400  # numpy fallback only supports the single-thread path
+        return
+    body = r.json()
+    assert body["backend"] == "cpu_mt" and body["threads"] == 4

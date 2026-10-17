@@ -39,7 +39,8 @@ def _clean(obj):
 
 @app.get("/api/engine")
 def engine_info():
-    return {"native": engine.native_available(), "cuda": engine.has_cuda(), "device": engine.device_name()}
+    return {"native": engine.native_available(), "cuda": engine.has_cuda(), "device": engine.device_name(),
+            "cpu_threads": engine.cpu_threads()}
 
 
 @app.get("/api/strategies")
@@ -142,7 +143,8 @@ class PriceRequest(BaseModel):
     n_paths: int = Field(1 << 20, ge=1_000, le=16_000_000)
     n_steps: int = Field(252, ge=1, le=2_000)
     seed: int = 42
-    backend: str = Field("auto", pattern="^(auto|cuda|cpu)$")
+    backend: str = Field("auto", pattern="^(auto|cuda|cpu|cpu_mt)$")
+    threads: int = Field(0, ge=0, le=256)
     bins: int = Field(60, ge=10, le=200)
 
 
@@ -152,7 +154,7 @@ def price(req: PriceRequest):
     try:
         r = engine.price(req.spot, req.rate, req.vol, req.maturity, legs, div=req.div, style=req.style,
                          barrier=req.barrier, n_paths=req.n_paths, n_steps=req.n_steps, seed=req.seed,
-                         backend=req.backend, return_terminal=True)
+                         backend=req.backend, return_terminal=True, threads=req.threads)
     except (RuntimeError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
 

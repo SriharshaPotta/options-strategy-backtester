@@ -3,13 +3,15 @@
 Workload: GBM, S0 = 100, σ = 20%, r = 4%, T = 1y, **252 steps per path**, float path math, double accumulation.
 
 - **GPU time:** simulation kernel + block reduction + result copy, measured with `cudaEvent`. Median of 5 runs after a warm-up. RNG seeding is reported separately.
-- **CPU time:** the same discretisation and payoff code on one thread (`std::mt19937_64` + `std::normal_distribution`), Release build.
+- **CPU time:** the same discretisation and payoff code (`std::mt19937_64` + `std::normal_distribution`), Release build, timed with `std::chrono`. Two baselines:
+  - `cpu` runs on one thread.
+  - `cpu_mt` splits the paths into contiguous blocks across N `std::thread`s, one independent RNG stream each, with N defaulting to every hardware thread.
 
 Reproduce with `notebooks/gpu_benchmark.ipynb`, or locally:
 
 ```bash
 cmake -S engine -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
-./build/mc_bench --paths 1048576,2097152,4194304 --steps 252 --json bench.json
+./build/mc_bench --paths 1048576,2097152,4194304 --steps 252 --json bench.json   # add --threads N to pin cpu_mt
 ```
 
 ## GPU vs CPU — NVIDIA Tesla T4 (Google Colab)
@@ -35,11 +37,39 @@ Throughput on the T4 is about **44 billion path-steps per second** (4.19M paths 
 | CPU (1 thread) | −3.8238 | 0.0030 | 6,296.4 ms |
 | Black-Scholes | −3.8268 | — | — |
 
-**Reading the speedup.** The baseline is deliberately simple: one thread with `std::mt19937_64` and `std::normal_distribution`, and the normal draw dominates its cost. A multi-threaded, SIMD-vectorised CPU implementation would narrow the gap considerably. The ~1,000× figure is a GPU-vs-single-thread comparison, not a GPU-vs-best-CPU comparison.
+## Multi-threaded CPU baseline: Intel Core i7-12700H (20 threads)
 
-## Other CPU baselines
+Laptop CPU (6 performance + 8 efficiency cores, 20 hardware threads), MSVC `/O2`, 252 steps, one run per configuration.
 
-| CPU | case | paths × steps | single-thread time |
-|---|---|---|---|
-| Intel Core i7-12700H (MSVC 19.4x, /O2) | european_call | 1,048,576 × 252 | 6,752 ms |
-| Intel Core i7-12700H (MSVC 19.4x, /O2) | iron_condor | 1,048,576 × 252 | 7,865 ms |
+| case | paths | cpu 1 thread | cpu 20 threads | thread scaling |
+|:--|--:|--:|--:|--:|
+| european_call | 1,048,576 | 3,075.9 ms | 370.8 ms | 8.3× |
+| european_call | 4,194,304 | 11,927.6 ms | 2,443.1 ms | 4.9× |
+| iron_condor | 1,048,576 | 4,424.2 ms | 541.3 ms | 8.2× |
+| iron_condor | 4,194,304 | 12,963.0 ms | 2,167.4 ms | 6.0× |
+
+Thread scaling (european call, 1M paths):
+
+| threads | 1 | 2 | 4 | 8 | 14 | 20 |
+|:--|--:|--:|--:|--:|--:|--:|
+| time (ms) | 3,182 | 1,771 | 1,159 | 717 | 541 | 462 |
+| speedup | 1.0× | 1.8× | 2.7× | 4.4× | 5.9× | 6.9× |
+
+Scaling flattens beyond the 6 performance cores, and the longer 4M-path runs show thermal throttling. Laptop timings also vary with power state: the same 1-thread, 1M-path run measured 6,752 ms earlier in a different power mode.
+
+## GPU vs multi-threaded CPU
+
+| case | paths | i7-12700H, 20 threads | Tesla T4 | GPU speedup |
+|:--|--:|--:|--:|--:|
+| european_call | 1,048,576 | 370.8 ms | 6.0 ms | ~62× |
+| european_call | 4,194,304 | 2,443.1 ms | 24.0 ms | ~102× |
+| iron_condor | 1,048,576 | 541.3 ms | 6.0 ms | ~90× |
+| iron_condor | 4,194,304 | 2,167.4 ms | 24.1 ms | ~90× |
+
+This is a cross-machine comparison: the T4 numbers come from Colab and the CPU numbers from the laptop. The Colab host itself exposes only 2 vCPUs. Rerunning the notebook prints a same-host `cpu_mt` column, but with 2 vCPUs that baseline is weak.
+
+## Reading the speedups
+
+- **vs 1 CPU thread: ~1,000×.** Both runs were on the Colab host. This baseline is deliberately simple.
+- **vs 20 CPU threads: ~60–100×.** This is the fairer comparison, made across machines.
+- **Remaining CPU headroom.** Both CPU baselines spend most of their time in `std::normal_distribution`. A vectorised RNG (e.g. SIMD Philox with Box-Muller) would narrow the gap further.

@@ -4,7 +4,7 @@
 
 A research tool for listed-options strategies:
 
-- **CUDA Monte Carlo pricing engine** in C++. It simulates 1M+ GBM price paths per run with per-thread cuRAND (Philox) state, coalesced memory access and an on-the-fly warp-shuffle reduction. It supports multi-leg, Asian and barrier payoffs, bump-and-revalue Greeks, and a single-threaded CPU reference for benchmarking.
+- **CUDA Monte Carlo pricing engine** in C++. It simulates 1M+ GBM price paths per run with per-thread cuRAND (Philox) state, coalesced memory access and an on-the-fly warp-shuffle reduction. It supports multi-leg, Asian and barrier payoffs, bump-and-revalue Greeks, and single- and multi-threaded CPU backends for benchmarking.
 - **Strategy ranker.** It scores concrete setups (short puts, verticals, iron condors, strangles, straddles…) by **open interest, bid/ask spread and delta fit** on live chains, with risk-neutral POP and max profit/loss.
 - **Backtester.** Event-driven entries, profit-target / stop-loss / expiry exits, natural-price fills and commissions. The Monte Carlo engine values every position at entry.
 - **React dashboard.** Ranked setups table, backtest P&L / win rate / drawdown / equity curve, and a Monte Carlo pricer with the payoff distribution.
@@ -17,14 +17,14 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/CUDA_ENGINE.md](docs/
 
 ## Performance
 
-NVIDIA Tesla T4, 252 steps per path, versus the same scheme on one CPU thread ([details](docs/BENCHMARKS.md)):
+NVIDIA Tesla T4, 252 steps per path, against the same path code on CPU ([details](docs/BENCHMARKS.md)):
 
-| paths | CPU (1 thread) | CUDA (T4) | speedup |
-|--:|--:|--:|--:|
-| 1,048,576 | 6.2 s | 6.0 ms | ~1,035× |
-| 4,194,304 | 25.0 s | 24.0 ms | ~1,043× |
+| paths | CPU, 1 thread | CPU, 20 threads (i7-12700H) | CUDA (T4) | vs 1 thread | vs 20 threads |
+|--:|--:|--:|--:|--:|--:|
+| 1,048,576 | 6.2 s | 371 ms | 6.0 ms | ~1,035× | ~62× |
+| 4,194,304 | 25.0 s | 2,443 ms | 24.0 ms | ~1,043× | ~102× |
 
-The GPU and CPU prices agree within one combined standard error and match Black-Scholes. Reproduce with [`notebooks/gpu_benchmark.ipynb`](notebooks/gpu_benchmark.ipynb).
+The single-thread and T4 numbers come from the same Colab host; the 20-thread column comes from a laptop CPU. GPU and CPU prices agree within one combined standard error and match Black-Scholes. Reproduce with [`notebooks/gpu_benchmark.ipynb`](notebooks/gpu_benchmark.ipynb).
 
 ## Quick start
 
@@ -59,6 +59,7 @@ engine.has_cuda(), engine.device_name()
 legs = [("put", 85, 1), ("put", 92, -1), ("call", 108, -1), ("call", 115, 1)]   # iron condor
 engine.price(100, 0.04, 0.2, 0.25, legs, n_paths=1 << 20, n_steps=252)
 # {'price': ..., 'std_error': ..., 'ci_low': ..., 'ci_high': ..., 'elapsed_ms': ..., 'backend': 'cuda', ...}
+# backend="auto" (CUDA if present, else cpu_mt) | "cuda" | "cpu" (1 thread) | "cpu_mt" (threads=N, 0 = all)
 
 from osb import data
 from osb.ranker import rank_setups

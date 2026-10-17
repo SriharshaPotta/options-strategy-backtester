@@ -36,6 +36,8 @@ endif()
 # ---------------------------------------------------------------- core ------
 add_library(mc_core STATIC src/cpu_engine.cpp)
 target_include_directories(mc_core PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
+find_package(Threads REQUIRED)
+target_link_libraries(mc_core PUBLIC Threads::Threads)
 
 if(MC_HAS_CUDA)
   target_sources(mc_core PRIVATE src/gpu_engine.cu src/kernels.cu)

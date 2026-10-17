@@ -121,7 +121,8 @@ export default function Pricer({ engine }: { engine: EngineInfo | null }) {
             <option value="cuda" disabled={!engine?.cuda}>
               cuda
             </option>
-            <option value="cpu">cpu</option>
+            <option value="cpu_mt">cpu ({engine?.cpu_threads ?? "all"} threads)</option>
+            <option value="cpu">cpu (1 thread)</option>
           </select>
         </label>
         <button className="primary" onClick={run} disabled={loading || legs.length === 0}>
@@ -170,7 +171,7 @@ export default function Pricer({ engine }: { engine: EngineInfo | null }) {
             <Kpi label="Std error" value={fmtNum(res.std_error, 5)} />
             <Kpi label="P(payoff > 0)" value={fmtPct(res.prob_positive_payoff)} />
             <Kpi label="Paths × steps" value={`${fmtInt(res.n_paths)} × ${res.n_steps}`} />
-            <Kpi label={`Sim time (${res.backend})`} value={`${fmtNum(res.elapsed_ms, 1)} ms`} />
+            <Kpi label={`Sim time (${res.backend}${res.threads > 1 ? ` × ${res.threads}` : ""})`} value={`${fmtNum(res.elapsed_ms, 1)} ms`} />
             {res.backend === "cuda" && <Kpi label="RNG init" value={`${fmtNum(res.rng_init_ms, 2)} ms`} />}
           </div>
           <figure className="chart">

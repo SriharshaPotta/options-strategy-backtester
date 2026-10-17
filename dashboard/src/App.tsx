@@ -65,6 +65,6 @@ export default function App() {
 function EngineBadge({ engine }: { engine: EngineInfo | null }) {
   if (!engine) return <span className="badge muted">engine…</span>;
   if (engine.cuda) return <span className="badge ok" title="CUDA Monte Carlo backend">CUDA · {engine.device}</span>;
-  if (engine.native) return <span className="badge warn">C++ CPU engine</span>;
+  if (engine.native) return <span className="badge warn">C++ CPU engine · {engine.cpu_threads} threads</span>;
   return <span className="badge muted">NumPy fallback</span>;
 }

@@ -42,3 +42,12 @@ def test_cuda_agrees_with_cpu():
     g = engine.price(100, 0.04, 0.2, 0.25, legs, n_paths=1 << 20, n_steps=32, backend="cuda")
     c = engine.price(100, 0.04, 0.2, 0.25, legs, n_paths=1 << 19, n_steps=32, backend="cpu")
     assert abs(g["price"] - c["price"]) < 3 * np.hypot(g["std_error"], c["std_error"])
+
+
+@pytest.mark.skipif(not engine.native_available(), reason="native module not built")
+def test_cpu_mt_matches_single_thread_statistically():
+    legs = [("put", 95, -1), ("put", 90, 1)]
+    one = engine.price(100, 0.04, 0.2, 0.5, legs, n_paths=200_000, n_steps=16, backend="cpu")
+    mt = engine.price(100, 0.04, 0.2, 0.5, legs, n_paths=200_000, n_steps=16, backend="cpu_mt", threads=4)
+    assert mt["backend"] == "cpu_mt" and mt["threads"] == 4
+    assert abs(one["price"] - mt["price"]) < 3 * np.hypot(one["std_error"], mt["std_error"])
