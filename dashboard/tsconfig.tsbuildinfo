@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/api.ts","./src/format.ts","./src/main.tsx","./src/types.ts","./src/components/backtest.tsx","./src/components/kpi.tsx","./src/components/pricer.tsx","./src/components/rankedsetups.tsx","./vite.config.ts"],"version":"5.6.3"}
